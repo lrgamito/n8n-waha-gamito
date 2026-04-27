@@ -1,0 +1,74 @@
+project:
+  name: n8n-waha
+  purpose: "Separated Docker stacks for local test and production (n8n + WAHA + Postgres + Redis + Nginx + Certbot)."
+  structure:
+    test:
+      compose_file: test/docker-compose.test.yml
+      env_example: test/.env.test.example
+      env_file: test/.env.test
+    production:
+      compose_file: production/docker-compose.prod.yml
+      env_example: production/.env.prod.example
+      env_file: production/.env.prod
+      nginx_template: production/deploy/nginx/default.conf.template
+      public_routes:
+        n8n: "https://<N8N_DOMAIN>/"
+        waha: "https://<N8N_DOMAIN>/waha/"
+  docs:
+    readme: README.md
+    production_runbook: PRODUCTION_DEPLOY.md
+
+commands:
+  test:
+    setup_env: "cp test/.env.test.example test/.env.test"
+    up: "docker-compose --env-file test/.env.test -f test/docker-compose.test.yml up -d"
+    ps: "docker-compose --env-file test/.env.test -f test/docker-compose.test.yml ps"
+    logs: "docker-compose --env-file test/.env.test -f test/docker-compose.test.yml logs -f"
+    down: "docker-compose --env-file test/.env.test -f test/docker-compose.test.yml down"
+    config_check: "docker-compose --env-file test/.env.test -f test/docker-compose.test.yml config"
+
+  production_local:
+    setup_env: "cp production/.env.prod.example production/.env.prod"
+    config_check: "docker-compose --env-file production/.env.prod -f production/docker-compose.prod.yml config"
+
+  production_vps:
+    config_check: "sudo docker compose --env-file production/.env.prod -f production/docker-compose.prod.yml config"
+    cert_init: "sudo docker compose --env-file production/.env.prod -f production/docker-compose.prod.yml --profile init run --rm --service-ports certbot-init"
+    up: "sudo docker compose --env-file production/.env.prod -f production/docker-compose.prod.yml up -d"
+    up_core_only: "sudo docker compose --env-file production/.env.prod -f production/docker-compose.prod.yml up -d postgres redis n8n waha"
+    stop_nginx: "sudo docker compose --env-file production/.env.prod -f production/docker-compose.prod.yml stop nginx"
+    ps: "sudo docker compose --env-file production/.env.prod -f production/docker-compose.prod.yml ps"
+    logs_nginx: "sudo docker compose --env-file production/.env.prod -f production/docker-compose.prod.yml logs -f nginx"
+    logs_n8n: "sudo docker compose --env-file production/.env.prod -f production/docker-compose.prod.yml logs -f n8n"
+    logs_waha: "sudo docker compose --env-file production/.env.prod -f production/docker-compose.prod.yml logs -f waha"
+    cert_renew_service: "sudo docker compose --env-file production/.env.prod -f production/docker-compose.prod.yml --profile certbot up -d certbot"
+    pull: "sudo docker compose --env-file production/.env.prod -f production/docker-compose.prod.yml pull"
+    restart: "sudo docker compose --env-file production/.env.prod -f production/docker-compose.prod.yml up -d"
+
+  remote:
+    ssh_vps: "ssh ubuntu@164.152.61.217 -i ./keys/cloudubuntu.priv"
+    rsync_to_vps: "rsync -az --delete -e \"ssh -i ./keys/cloudubuntu.priv\" ./ ubuntu@164.152.61.217:/home/ubuntu/n8n-waha/"
+    scp_to_vps: "scp -i ./keys/cloudubuntu.priv -r ./ ubuntu@164.152.61.217:/home/ubuntu/n8n-waha"
+
+assistant_memory:
+  remotes:
+    production_vps:
+      host: 164.152.61.217
+      user: ubuntu
+      app_path: /home/ubuntu/n8n-waha
+      ssh_key_path: ./keys/cloudubuntu.priv
+      ssh_command: "ssh ubuntu@164.152.61.217 -i ./keys/cloudubuntu.priv"
+  assumptions:
+    domain_strategy: "single domain"
+    waha_public_path: "/waha"
+    n8n_domain: "n8n.gamito.qzz.io"
+    waha_image: "devlikeapro/waha:gows-arm-2026.4.2"
+  known_constraints:
+    - "WAHA image tag must match VPS architecture (ARM: gows-arm-*; amd64: gows-*)."
+    - "Let's Encrypt HTTP-01 requires cloud firewall ingress on port 80."
+    - "For certbot-init with docker compose run, use --service-ports so port 80 is actually published."
+  update_rules:
+    - "Update this file when stack paths, env file names, routes, or operational commands change."
+    - "Do not store secrets here; only references to env files and command templates."
+    - "Keep commands aligned with README.md and PRODUCTION_DEPLOY.md."
+  last_updated_utc: "2026-04-20T20:20:00Z"

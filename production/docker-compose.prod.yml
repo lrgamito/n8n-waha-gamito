@@ -1,0 +1,137 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - internal
+
+  redis:
+    image: ${REDIS_IMAGE}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - internal
+
+  n8n:
+    image: ${N8N_IMAGE}
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      N8N_HOST: ${N8N_DOMAIN}
+      N8N_PROTOCOL: https
+      WEBHOOK_URL: https://${N8N_DOMAIN}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE}
+      N8N_LOG_LEVEL: ${N8N_LOG_LEVEL}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      QUEUE_BULL_REDIS_HOST: redis
+      QUEUE_BULL_REDIS_PORT: 6379
+      QUEUE_BULL_REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    restart: unless-stopped
+    networks:
+      - internal
+
+  waha:
+    image: ${WAHA_IMAGE}
+    environment:
+      WAHA_API_KEY: ${WAHA_API_KEY}
+      WAHA_DASHBOARD_ENABLED: "True"
+      WAHA_DASHBOARD_USERNAME: ${WAHA_DASHBOARD_USERNAME}
+      WAHA_DASHBOARD_PASSWORD: ${WAHA_DASHBOARD_PASSWORD}
+      WHATSAPP_SWAGGER_ENABLED: "True"
+      WHATSAPP_SWAGGER_USERNAME: ${WHATSAPP_SWAGGER_USERNAME}
+      WHATSAPP_SWAGGER_PASSWORD: ${WHATSAPP_SWAGGER_PASSWORD}
+      WAHA_LOG_LEVEL: ${WAHA_LOG_LEVEL}
+      WAHA_LOG_FORMAT: JSON
+      WHATSAPP_DEFAULT_ENGINE: ${WHATSAPP_DEFAULT_ENGINE}
+      WHATSAPP_HOOK_URL: https://${N8N_DOMAIN}/webhook/webhook
+      WHATSAPP_HOOK_EVENTS: ${WHATSAPP_HOOK_EVENTS}
+      WAHA_BASE_URL: https://${N8N_DOMAIN}/waha
+    volumes:
+      - waha_sessions:/app/.sessions
+      - waha_media:/app/.media
+    restart: unless-stopped
+    networks:
+      - internal
+
+  nginx:
+    image: ${NGINX_IMAGE}
+    depends_on:
+      - n8n
+      - waha
+    environment:
+      N8N_DOMAIN: ${N8N_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - certbot_www:/var/www/certbot
+      - certbot_certs:/etc/letsencrypt
+    restart: unless-stopped
+    networks:
+      - internal
+
+  certbot-init:
+    image: ${CERTBOT_IMAGE}
+    profiles:
+      - init
+    ports:
+      - "80:80"
+    command: >
+      certonly --standalone --preferred-challenges http --non-interactive
+      --agree-tos --email ${LETSENCRYPT_EMAIL}
+      -d ${N8N_DOMAIN}
+    volumes:
+      - certbot_certs:/etc/letsencrypt
+    networks:
+      - internal
+
+  certbot:
+    image: ${CERTBOT_IMAGE}
+    profiles:
+      - certbot
+    entrypoint: /bin/sh
+    command: >
+      -c 'trap exit TERM; while :; do
+      certbot renew --webroot -w /var/www/certbot;
+      sleep 12h & wait $${!};
+      done;'
+    volumes:
+      - certbot_www:/var/www/certbot
+      - certbot_certs:/etc/letsencrypt
+    restart: unless-stopped
+    networks:
+      - internal
+
+volumes:
+  postgres_data:
+  redis_data:
+  waha_sessions:
+  waha_media:
+  n8n_data:
+  certbot_www:
+  certbot_certs:
+
+networks:
+  internal:
+    driver: bridge
